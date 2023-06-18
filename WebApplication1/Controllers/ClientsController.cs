@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using WebApplication1.Models;
 using WebApplication1.Models.DTOs;
+using WebApplication1.Services;
 
 namespace WebApplication1.Controllers
 {
@@ -10,74 +11,58 @@ namespace WebApplication1.Controllers
     [ApiController]
     public class ClientsController : ControllerBase
     {
-        private readonly Master1Context _context;
+        private readonly ITripsService _dbService;
 
-        public ClientsController (Master1Context context)
+        public ClientsController (TripsService context)
         {
-            _context = context;
+            _dbService = context;
         }
 
         [HttpDelete("{id}")]
         public async Task<IActionResult>Remove(int id)
         {
-            if(await _context.ClientTrips.SingleOrDefaultAsync(e => e.IdClient == id) != null)
+            if(await _dbService.DoesClientExists(id))
             {
                 return Conflict();
             }
 
-            var client = await _context.Clients.SingleOrDefaultAsync(e => e.IdClient == id);
+            var client = await _dbService.GetClient(id);
             if (client == null)
             {
                 return NotFound();
             }
-            _context.Clients.Remove(client);
-            await _context.SaveChangesAsync();
+            _dbService.Remove(client);
             return Ok();
         }
         [HttpPost("{idTrip}/clients")]
         public async Task<IActionResult> AssignClientToTrip(ClientTripAssign clientTripAssign)
         {
             int clientid = -1;
-            if (!await _context.Clients.AnyAsync(e => e.Pesel == clientTripAssign.pesel))
+
+            if (!await _dbService.DoesClientExistsPesel(clientTripAssign.pesel))
             {
-                clientid = _context.Clients.Max(e => e.IdClient) + 1;
-                await _context.Clients.AddAsync(new Client
-                {
-                    IdClient = clientid,
-                    FirstName = clientTripAssign.firstName,
-                    LastName = clientTripAssign.lastName,
-                    Email = clientTripAssign.email,
-                    Telephone = clientTripAssign.telephone,
-                    Pesel = clientTripAssign.pesel,
-                });
+                clientid = await _dbService.GetMax();
+                await _dbService.Add(clientid, clientTripAssign);
+
             }
-            await _context.SaveChangesAsync();
             if (clientid == -1)
             {
-                var client = await _context.Clients.SingleOrDefaultAsync(e => e.Pesel == clientTripAssign.pesel);
+                var client = await _dbService.GetClientByPesel(clientTripAssign.pesel);
                 clientid = client.IdClient;
             }
 
 
-            if (await _context.ClientTrips.AnyAsync(e => e.IdClient == clientid && e.IdTrip == clientTripAssign.tripID))
+            if (await _dbService.DoesClientExistsTrip(clientid, clientTripAssign))
             {
                 return Conflict();
             }
 
-            if (!await _context.Trips.AnyAsync(e => e.IdTrip == clientTripAssign.tripID))
+            if (!await _dbService.DoesExistsTrip(clientTripAssign))
             {
                 return NotFound();
             }
 
-            await _context.AddAsync(new ClientTrip
-            {
-                IdClient = clientid,
-                IdTrip = clientTripAssign.tripID,
-                PaymentDate = clientTripAssign.PaymentDate.HasValue ? null : clientTripAssign.PaymentDate,
-                RegisteredAt = DateTime.Now
-            });
-
-            await _context.SaveChangesAsync();
+            await _dbService.AddAsync(clientid, clientTripAssign);
             return NoContent();
 
         }
